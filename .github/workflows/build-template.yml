@@ -140,21 +140,49 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          js_candidates=(godot-src/bin/godot.web.template_release.wasm32*.js)
+          wrapped_candidates=(godot-src/bin/godot.web.template_release.wasm32*.wrapped.js)
+          all_js_candidates=(godot-src/bin/godot.web.template_release.wasm32*.js)
           wasm_candidates=(godot-src/bin/godot.web.template_release.wasm32*.wasm)
           shopt -u nullglob
-          if [ "${#js_candidates[@]}" -ne 1 ] || [ "${#wasm_candidates[@]}" -ne 1 ]; then
-            echo "Expected exactly one JavaScript artifact and one WASM artifact" >&2
-            printf 'JavaScript candidates (%s): %s\n' "${#js_candidates[@]}" "${js_candidates[*]:-<none>}" >&2
+
+          # Godot 4.7 adds engine.js and wrapped.js; use wrapped.js like the official web template ZIP.
+          if [ "${#wrapped_candidates[@]}" -eq 1 ]; then
+            js_file="${wrapped_candidates[0]}"
+            js_stem="${js_file%.wrapped.js}"
+          elif [ "${#wrapped_candidates[@]}" -gt 1 ]; then
+            echo "Expected at most one wrapped JavaScript artifact" >&2
+            printf 'Wrapped candidates (%s): %s\n' "${#wrapped_candidates[@]}" "${wrapped_candidates[*]}" >&2
+            exit 1
+          else
+            # Older Godot versions may produce one plain JS file without the wrapper suffix.
+            js_candidates=()
+            for candidate in "${all_js_candidates[@]}"; do
+              case "$candidate" in
+                *.engine.js|*.wrapped.js) ;;
+                *) js_candidates+=("$candidate") ;;
+              esac
+            done
+            if [ "${#js_candidates[@]}" -ne 1 ]; then
+              echo "Expected one plain JavaScript artifact when no wrapped artifact exists" >&2
+              printf 'JavaScript candidates (%s): %s\n' "${#js_candidates[@]}" "${js_candidates[*]:-<none>}" >&2
+              exit 1
+            fi
+            js_file="${js_candidates[0]}"
+            js_stem="${js_file%.js}"
+          fi
+
+          if [ "${#wasm_candidates[@]}" -ne 1 ]; then
+            echo "Expected exactly one WASM artifact" >&2
             printf 'WASM candidates (%s): %s\n' "${#wasm_candidates[@]}" "${wasm_candidates[*]:-<none>}" >&2
             exit 1
           fi
-          js_file="${js_candidates[0]}"
           wasm_file="${wasm_candidates[0]}"
+          wasm_stem="${wasm_file%.wasm}"
           test -s "$js_file"
           test -s "$wasm_file"
-          if [ "${js_file%.js}" != "${wasm_file%.wasm}" ]; then
+          if [ "$js_stem" != "$wasm_stem" ]; then
             echo "JavaScript and WASM artifact stems do not match" >&2
+            printf 'JavaScript stem: %s\nWASM stem: %s\n' "$js_stem" "$wasm_stem" >&2
             exit 1
           fi
           echo "js=$js_file" >> "$GITHUB_OUTPUT"
